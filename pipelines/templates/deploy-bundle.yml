@@ -1,0 +1,26 @@
+# Deploys the Databricks Asset Bundle to one target with the environment's service principal.
+parameters:
+  - name: target
+    type: string
+  - name: serviceConnection
+    type: string
+  - name: ref
+    type: string
+    default: ""        # optional git ref (tag) to deploy instead of the checked-out commit (rollback)
+
+steps:
+  - task: AzureCLI@2
+    displayName: databricks bundle deploy -t ${{ parameters.target }}
+    inputs:
+      azureSubscription: ${{ parameters.serviceConnection }}
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: |
+        set -euo pipefail
+        if [ -n "${{ parameters.ref }}" ]; then
+          git fetch --tags --force
+          git checkout --detach "${{ parameters.ref }}"
+        fi
+        export DATABRICKS_AUTH_TYPE=azure-cli
+        databricks bundle validate -t ${{ parameters.target }} --var="service_principal_id=$(DBX_SP_APP_ID)"
+        databricks bundle deploy   -t ${{ parameters.target }} --var="service_principal_id=$(DBX_SP_APP_ID)"

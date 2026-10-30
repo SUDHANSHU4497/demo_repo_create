@@ -1,0 +1,14 @@
+# Unity Catalog objects used by the agents: a volume for job input/output files and the schema
+# that holds validation history. (Tables are created by the setup notebook - see docs/SETUP.md.)
+resources:
+  schemas:
+    ops:
+      catalog_name: ${var.catalog}
+      name: ops
+      comment: Operational data for the agentic CI/CD system
+  volumes:
+    agentic_validation:
+      catalog_name: ${var.catalog}
+      schema_name: ${resources.schemas.ops.name}
+      name: agentic_validation
+      comment: Input/output documents of agentic data validation runs

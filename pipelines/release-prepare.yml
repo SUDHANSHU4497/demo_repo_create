@@ -1,0 +1,41 @@
+# Release Agent, step 1: open the release PR (rc/vX.Y.Z -> release) for the latest QA-certified
+# commit. Run manually, or on the release-train schedule below. Blocked outside the change window.
+trigger: none
+pr: none
+
+schedules:
+  - cron: "30 4 * * Tue"          # 10:00 IST every Tuesday (release train)
+    displayName: Weekly release train
+    branches: { include: [main] }
+    always: false                  # only if main changed since the last scheduled run
+
+parameters:
+  - name: commit
+    displayName: Certified commit to release (blank = latest certified)
+    type: string
+    default: " "
+  - name: bump
+    displayName: Version bump
+    type: string
+    default: auto
+    values: [auto, patch, minor, major]
+
+variables:
+  - group: agentic-devops-common
+  - group: agentic-devops-qa
+
+jobs:
+  - job: prepare
+    pool: { vmImage: ubuntu-latest }
+    timeoutInMinutes: 120
+    steps:
+      - template: templates/setup.yml
+      - template: templates/run-agent.yml
+        parameters:
+          name: prepare
+          serviceConnection: sc-databricks-qa
+          displayName: Release Agent - open release PR
+          ${{ if eq(trim(parameters.commit), '') }}:
+            command: release-prepare --bump ${{ parameters.bump }}
+          ${{ else }}:
+            command: release-prepare --bump ${{ parameters.bump }} --commit ${{ trim(parameters.commit) }}

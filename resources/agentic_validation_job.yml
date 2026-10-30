@@ -1,0 +1,36 @@
+# The job the Data Validation Agent triggers (Jobs API run-now). Runs on serverless compute
+# in the same workspace as the data; only the JSON report leaves the workspace.
+resources:
+  jobs:
+    agentic_data_validation:
+      name: agentic-data-validation-${bundle.target}
+      max_concurrent_runs: 10
+      timeout_seconds: 3600
+      parameters:
+        - name: input_path
+          default: ""
+        - name: output_path
+          default: ""
+      tasks:
+        - task_key: validate
+          environment_key: default
+          python_wheel_task:
+            package_name: agentic_devops
+            entry_point: agentic-validation-job
+            parameters:
+              - --input-path
+              - "{{job.parameters.input_path}}"
+              - --output-path
+              - "{{job.parameters.output_path}}"
+      environments:
+        - environment_key: default
+          spec:
+            environment_version: "2"
+            dependencies:
+              - ../dist/*.whl
+      email_notifications:
+        on_failure:
+          - ${var.alert_email}
+      tags:
+        owner: data-platform
+        component: agentic-devops

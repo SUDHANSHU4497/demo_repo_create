@@ -1,0 +1,54 @@
+# Column naming standard enforced by the Data Validation Agent.
+case_style: snake_case
+max_length: 64
+
+# Abbreviation -> glossary word. `cust_id` is flagged with suggestion `customer_id`.
+abbreviations:
+  cust: customer
+  custid: customer_id
+  amt: amount
+  qty: quantity
+  num: number
+  nbr: number
+  "no": number                          # quoted: YAML reads a bare no as false
+  dt: date
+  desc: description
+  addr: address
+  acct: account
+  txn: transaction
+  trx: transaction
+  prod: product
+  cat: category
+  dept: department
+  emp: employee
+  mgr: manager
+  org: organization
+  pct: percent
+  avg: average
+  cnt: count
+  curr: currency
+  ccy: currency
+  sts: status
+  stat: status
+  upd: updated
+  crt: created
+  src: source
+  tgt: target
+
+# Tokens that are fine as-is even if they look like abbreviations.
+allowed_tokens: [id, url, sku, utc, ip, iso, ts, etl, uuid, gst, pan, ifsc]
+
+reserved_words: [select, from, where, table, order, group, by, user, date, timestamp, time, year,
+                 month, day, key, value, values, index, default, desc, asc, limit, union, join,
+                 column, schema, database, partition, range, rows, interval, current]
+
+type_conventions:
+  - type: boolean
+    prefixes: [is_, has_, can_, should_, was_, allow_]
+    severity: warning
+  - type: timestamp
+    suffixes: [_ts, _at, _timestamp]
+    severity: info
+  - type: date
+    suffixes: [_date]
+    severity: info

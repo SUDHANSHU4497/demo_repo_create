@@ -1,0 +1,60 @@
+# Databricks Asset Bundle: one definition, deployed to three workspaces.
+# Replace the three workspace hosts below with your workspace URLs.
+#   feature/* -> dev (developers)   main -> qa   release -> prod
+bundle:
+  name: agentic_devops_platform
+
+include:
+  - resources/*.yml
+
+artifacts:
+  agentic_devops_wheel:
+    type: whl
+    build: python -m build --wheel
+    path: .
+
+variables:
+  catalog:
+    description: Unity Catalog catalog for this environment
+  service_principal_id:
+    description: Application (client) id of the environment's deployment service principal
+    default: ""
+  alert_email:
+    default: data-platform-alerts@example.com
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://adb-1111111111111111.11.azuredatabricks.net
+    variables:
+      catalog: dev
+
+  qa:
+    mode: production
+    workspace:
+      host: https://adb-2222222222222222.12.azuredatabricks.net
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
+    run_as:
+      service_principal_name: ${var.service_principal_id}
+    variables:
+      catalog: qa
+    permissions:
+      - group_name: data-engineers
+        level: CAN_VIEW
+
+  prod:
+    mode: production
+    workspace:
+      host: https://adb-3333333333333333.13.azuredatabricks.net
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
+    run_as:
+      service_principal_name: ${var.service_principal_id}
+    variables:
+      catalog: prod
+    permissions:
+      - group_name: data-platform-admins
+        level: CAN_MANAGE
+      - group_name: data-engineers
+        level: CAN_VIEW

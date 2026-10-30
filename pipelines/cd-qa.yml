@@ -1,0 +1,55 @@
+# Continuous deployment to the QA workspace. Runs when a PR completes into `main`
+# (and for hotfix branches, which must be QA-certified before they can go to production).
+#   Build -> Deploy QA (bundle) -> Certify (QA Promotion Agent: validate QA tables, tag commit)
+trigger:
+  branches:
+    include: [main, hotfix/*]
+  paths:
+    exclude: [docs/*, README.md]
+pr: none
+
+variables:
+  - group: agentic-devops-common
+  - group: agentic-devops-qa
+
+stages:
+  - stage: Build
+    jobs:
+      - job: test
+        pool: { vmImage: ubuntu-latest }
+        steps:
+          - template: templates/setup.yml
+            parameters: { extras: "dev" }
+          - script: python -m pytest -q
+            displayName: Unit tests
+
+  - stage: DeployQA
+    dependsOn: Build
+    jobs:
+      - deployment: deploy
+        pool: { vmImage: ubuntu-latest }
+        environment: databricks-qa
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - template: templates/setup.yml
+                - template: templates/deploy-bundle.yml
+                  parameters: { target: qa, serviceConnection: sc-databricks-qa }
+
+  - stage: CertifyQA
+    dependsOn: DeployQA
+    jobs:
+      - job: certify
+        pool: { vmImage: ubuntu-latest }
+        timeoutInMinutes: 120
+        steps:
+          - template: templates/setup.yml
+          # Optional: run the pipelines in QA first so validation sees fresh data, e.g.
+          #   databricks bundle run -t qa <your_job>
+          - template: templates/run-agent.yml
+            parameters:
+              name: certify
+              serviceConnection: sc-databricks-qa
+              displayName: QA Promotion Agent - validate QA and certify commit
+              command: certify-qa --commit $(Build.SourceVersion) --source-branch $(Build.SourceBranch)

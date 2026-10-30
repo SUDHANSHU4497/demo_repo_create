@@ -1,0 +1,16 @@
+table: sales.customers
+owner: sales-data-team
+description: Customer master (SCD1).
+primary_key: [customer_id]
+sources:
+  - src/pipelines/sales/customers/**
+columns:
+  - {name: customer_id, type: bigint, nullable: false}
+  - {name: customer_name, type: string, nullable: false}
+  - {name: email_address, type: string}
+  - {name: country_code, type: string}
+  - {name: is_active, type: boolean, nullable: false}
+  - {name: created_at, type: timestamp, nullable: false}
+  - {name: updated_at, type: timestamp}
+validation:
+  min_rows: 1

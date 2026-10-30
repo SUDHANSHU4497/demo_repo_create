@@ -1,0 +1,60 @@
+# Build validation for every PR into `main` or `release`.
+# Wire it up as a *Build validation* branch policy on both branches (see docs/SETUP.md).
+#   Stage CI             : lint + unit tests
+#   Stage DataValidation : Data Validation Agent -> PR status agentic-devops/data-validation
+#                          PR -> main    : tables the feature produced in the DEV workspace
+#                          PR -> release : tables in the QA workspace
+trigger: none
+pr: none   # Azure Repos uses branch policies, not this keyword
+
+variables:
+  - group: agentic-devops-common
+
+stages:
+  - stage: CI
+    jobs:
+      - job: test
+        pool: { vmImage: ubuntu-latest }
+        steps:
+          - template: templates/setup.yml
+            parameters: { extras: "dev,llm,azure" }
+          - script: ruff check src tests && ruff format --check src tests
+            displayName: Lint
+          - script: python -m pytest -q --junitxml=$(Build.ArtifactStagingDirectory)/junit.xml
+            displayName: Unit tests
+          - task: PublishTestResults@2
+            condition: always()
+            inputs: { testResultsFiles: "$(Build.ArtifactStagingDirectory)/junit.xml" }
+
+  - stage: DataValidation
+    dependsOn: CI
+    jobs:
+      - job: validate_dev
+        condition: eq(variables['System.PullRequest.TargetBranch'], 'refs/heads/main')
+        pool: { vmImage: ubuntu-latest }
+        timeoutInMinutes: 90
+        variables:
+          - group: agentic-devops-dev
+        steps:
+          - template: templates/setup.yml
+          - template: templates/run-agent.yml
+            parameters:
+              name: validate
+              serviceConnection: sc-databricks-dev
+              displayName: Data Validation Agent (dev data)
+              command: validate --pr-id $(System.PullRequest.PullRequestId)
+
+      - job: validate_qa
+        condition: eq(variables['System.PullRequest.TargetBranch'], 'refs/heads/release')
+        pool: { vmImage: ubuntu-latest }
+        timeoutInMinutes: 90
+        variables:
+          - group: agentic-devops-qa
+        steps:
+          - template: templates/setup.yml
+          - template: templates/run-agent.yml
+            parameters:
+              name: validate
+              serviceConnection: sc-databricks-qa
+              displayName: Data Validation Agent (QA data)
+              command: validate --pr-id $(System.PullRequest.PullRequestId)

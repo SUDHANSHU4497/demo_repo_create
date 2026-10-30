@@ -1,0 +1,69 @@
+# Continuous deployment to PRODUCTION. Runs when the release PR completes into `release`.
+#   DeployProd : waits on the `databricks-prod` environment checks (approvers, business hours,
+#                exclusive lock), then deploys the bundle with the prod service principal.
+#   Verify     : Release Agent - post-deploy verification, tag vX.Y.Z, hotfix back-merge PR.
+#   Rollback   : only if Verify fails - redeploy the previous release tag.
+trigger:
+  branches:
+    include: [release]
+pr: none
+
+variables:
+  - group: agentic-devops-common
+  - group: agentic-devops-prod
+
+stages:
+  - stage: DeployProd
+    jobs:
+      - deployment: deploy
+        pool: { vmImage: ubuntu-latest }
+        environment: databricks-prod
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - template: templates/setup.yml
+                - template: templates/deploy-bundle.yml
+                  parameters: { target: prod, serviceConnection: sc-databricks-prod }
+
+  - stage: Verify
+    dependsOn: DeployProd
+    jobs:
+      - job: finalize
+        pool: { vmImage: ubuntu-latest }
+        steps:
+          - template: templates/setup.yml
+          - template: templates/run-agent.yml
+            parameters:
+              name: finalize
+              serviceConnection: sc-databricks-prod
+              displayName: Release Agent - verify production and tag
+              command: release-finalize --commit $(Build.SourceVersion)
+
+  - stage: Rollback
+    dependsOn: Verify
+    condition: failed('Verify')
+    jobs:
+      - job: target
+        pool: { vmImage: ubuntu-latest }
+        steps:
+          - template: templates/setup.yml
+          - template: templates/run-agent.yml
+            parameters:
+              name: rb
+              serviceConnection: sc-databricks-prod
+              displayName: Release Agent - find last good release
+              command: rollback-target --failed-commit $(Build.SourceVersion)
+      - deployment: redeploy
+        dependsOn: target
+        pool: { vmImage: ubuntu-latest }
+        environment: databricks-prod
+        variables:
+          rollbackTag: $[ dependencies.target.outputs['rb.rollback_tag'] ]
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - template: templates/setup.yml
+                - template: templates/deploy-bundle.yml
+                  parameters: { target: prod, serviceConnection: sc-databricks-prod, ref: $(rollbackTag) }

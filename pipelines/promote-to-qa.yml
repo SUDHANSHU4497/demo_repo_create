@@ -1,0 +1,32 @@
+# QA Promotion Agent. Queued by a developer from Azure DevOps or from the Databricks notebook
+# notebooks/promote_to_qa.py (Pipelines REST API) with the branch to promote.
+trigger: none
+pr: none
+
+parameters:
+  - name: sourceBranch
+    displayName: Feature branch to promote (e.g. feature/4521-orders-dedupe)
+    type: string
+  - name: workItemId
+    displayName: Work item id (optional if the branch name or commits reference one)
+    type: string
+    default: "0"
+
+variables:
+  - group: agentic-devops-common
+  - group: agentic-devops-dev
+
+jobs:
+  - job: promote
+    pool: { vmImage: ubuntu-latest }
+    steps:
+      - template: templates/setup.yml
+      - template: templates/run-agent.yml
+        parameters:
+          name: promote
+          serviceConnection: sc-databricks-dev
+          displayName: QA Promotion Agent - open/refresh PR into main
+          ${{ if eq(parameters.workItemId, '0') }}:
+            command: promote-qa --source-branch "${{ parameters.sourceBranch }}"
+          ${{ else }}:
+            command: promote-qa --source-branch "${{ parameters.sourceBranch }}" --work-item ${{ parameters.workItemId }}

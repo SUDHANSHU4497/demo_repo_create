@@ -1,0 +1,109 @@
+# Agentic DevOps configuration. Values like ${NAME} come from Azure DevOps variable groups
+# (backed by Key Vault). Never commit secrets here.
+
+azure_devops:
+  organization_url: ${ADO_ORG_URL:-https://dev.azure.com/contoso}
+  project: ${ADO_PROJECT:-DataPlatform}
+  repository: ${ADO_REPOSITORY:-databricks-pipelines}
+  status_genre: agentic-devops          # PR statuses: agentic-devops/<name>
+  pipelines:
+    promote_to_qa: ${ADO_PIPELINE_PROMOTE_QA:-}
+
+branches:
+  qa: main                              # merges here deploy to the QA workspace
+  prod: release                         # merges here deploy to the production workspace
+  feature_pattern: '^(feature|bugfix)/[A-Za-z0-9._-]+$'
+  hotfix_pattern: '^hotfix/[A-Za-z0-9._-]+$'
+  release_candidate_prefix: rc/
+  qa_certified_tag_prefix: qa-certified/
+
+environments:
+  dev:
+    workspace_url: ${DBX_DEV_HOST:-}
+    catalog: dev
+    validation_job_id: ${DBX_DEV_VALIDATION_JOB_ID:-}
+    volume_path: /Volumes/dev/ops/agentic_validation
+    results_table: dev.ops.validation_results
+  qa:
+    workspace_url: ${DBX_QA_HOST:-}
+    catalog: qa
+    validation_job_id: ${DBX_QA_VALIDATION_JOB_ID:-}
+    volume_path: /Volumes/qa/ops/agentic_validation
+    results_table: qa.ops.validation_results
+  prod:
+    workspace_url: ${DBX_PROD_HOST:-}
+    catalog: prod
+    validation_job_id: ${DBX_PROD_VALIDATION_JOB_ID:-}
+    volume_path: /Volumes/prod/ops/agentic_validation
+    results_table: prod.ops.validation_results
+
+validation:
+  contracts_dir: contracts
+  naming_standards_path: config/naming_standards.yml
+  execution_mode: databricks_job        # databricks_job | local
+  gate_environments:                    # PR target branch -> whose data is validated
+    main: dev                           #   feature -> main: tables the feature produced in dev
+    release: qa                         #   main -> release: tables produced in QA
+  fail_on_warnings: false
+  null_ratio_warn_threshold: 0.95
+  treat_blank_as_null: true
+  require_primary_key: true
+  sample_limit: 5
+  global_impact_paths:                  # a change here re-validates every table
+    - src/common/**
+    - config/naming_standards.yml
+  allow_fully_null_columns: []
+  severity_overrides: {}                # e.g. {naming.type_convention: off, naming.*: warning}
+  poll_interval_seconds: 20
+  timeout_minutes: 60
+  max_findings_in_comment: 50
+
+qa_promotion:
+  environment: qa
+  merge_strategy: squash
+  delete_source_branch: true
+  transition_work_items: true
+  require_work_item: true
+  auto_complete: true
+  auto_promote_on_push: false
+  certify_profile: full
+
+release:
+  environment: prod
+  qa_environment: qa
+  merge_strategy: noFastForward
+  tag_prefix: v
+  initial_version: 1.0.0
+  revalidate_in_qa: true
+  verify_profile: schema_only           # post-deploy prod check: schema + naming, no full scans
+  high_risk_reviewer_ids:               # Entra/ADO identity ids added as required reviewers on HIGH risk
+    - ${ADO_RELEASE_MANAGERS_GROUP_ID:-}
+  change_window:
+    timezone: Asia/Kolkata
+    days: [Mon, Tue, Wed, Thu]
+    start: "10:00"
+    end: "17:00"
+  freeze_periods:
+    - start: 2026-12-24
+      end: 2027-01-02
+      reason: Year-end freeze
+
+llm:
+  enabled: ${LLM_ENABLED:-false}
+  provider: ${LLM_PROVIDER:-foundry}     # foundry (Claude in Microsoft Foundry) | anthropic | none
+  model: ${LLM_MODEL:-claude-opus-5-5}   # on Foundry: your deployment name
+  effort: medium
+  max_tokens: 16000
+  foundry_resource: ${ANTHROPIC_FOUNDRY_RESOURCE:-}
+  foundry_fallback_model: claude-opus-4-8
+  share_sample_values: false            # never send row values (e.g. duplicate keys) to the LLM
+
+notifications:
+  teams_webhook_url: ${TEAMS_WEBHOOK_URL:-}
+
+audit:
+  sink: ${AUDIT_SINK:-jsonl}            # jsonl | databricks_sql | none
+  jsonl_path: ${BUILD_ARTIFACTSTAGINGDIRECTORY:-agentic-artifacts}/agentic/audit.jsonl   # published with the run
+  environment: qa
+  warehouse_id: ${DBX_AUDIT_WAREHOUSE_ID:-}
+  table: ops.agentic.audit_events

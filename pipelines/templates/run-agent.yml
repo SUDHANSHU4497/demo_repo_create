@@ -1,0 +1,40 @@
+# Runs one agent command with an Entra ID login for the environment's service principal.
+# - Azure DevOps API: the job access token (Build Service identity) via SYSTEM_ACCESSTOKEN.
+# - Databricks / Foundry: azure-identity picks up the `az` login of the service connection
+#   (workload identity federation - no client secrets).
+parameters:
+  - name: serviceConnection
+    type: string
+  - name: command
+    type: string
+  - name: displayName
+    type: string
+  - name: name
+    type: string
+    default: agent
+  - name: condition
+    type: string
+    default: succeeded()
+
+steps:
+  - task: AzureCLI@2
+    name: ${{ parameters.name }}
+    displayName: ${{ parameters.displayName }}
+    condition: ${{ parameters.condition }}
+    inputs:
+      azureSubscription: ${{ parameters.serviceConnection }}
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: |
+        set -euo pipefail
+        agentic-devops ${{ parameters.command }}
+    env:
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
+  - task: PublishPipelineArtifact@1
+    displayName: Publish agent evidence
+    condition: always()
+    inputs:
+      targetPath: $(Build.ArtifactStagingDirectory)/agentic
+      artifact: agentic-${{ parameters.name }}-$(System.JobAttempt)
+    continueOnError: true

@@ -1,0 +1,15 @@
+table: sales.order_items
+owner: sales-data-team
+description: Order lines. Composite key.
+primary_key: [order_id, line_number]
+sources:
+  - src/pipelines/sales/order_items/**
+columns:
+  - {name: order_id, type: bigint, nullable: false}
+  - {name: line_number, type: int, nullable: false}
+  - {name: product_id, type: bigint, nullable: false}
+  - {name: quantity, type: int, nullable: false}
+  - {name: unit_price, type: "decimal(18,2)", nullable: false}
+  - {name: line_amount, type: "decimal(18,2)"}
+validation:
+  min_rows: 1

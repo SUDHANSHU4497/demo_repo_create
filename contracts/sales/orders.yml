@@ -1,0 +1,22 @@
+table: sales.orders                       # schema.table - catalog comes from the environment
+owner: sales-data-team
+description: One row per customer order (silver layer).
+primary_key: [order_id]
+sources:                                  # code that writes this table (impact analysis)
+  - src/pipelines/sales/orders/**
+  - notebooks/sales/orders_*.py
+columns:
+  - {name: order_id, type: bigint, nullable: false}
+  - {name: customer_id, type: bigint, nullable: false}
+  - {name: order_date, type: date, nullable: false}
+  - {name: order_status, type: string, nullable: false}
+  - {name: order_amount, type: "decimal(18,2)"}
+  - {name: currency_code, type: string}
+  - {name: discount_code, type: string, allow_fully_null: true}   # promo feature not live yet
+  - {name: is_gift, type: boolean}
+  - {name: created_at, type: timestamp, nullable: false}
+  - {name: updated_at, type: timestamp}
+validation:
+  filter: "order_date >= date_sub(current_date(), 400)"   # bound full scans on a large table
+  min_rows: 1
+  allow_extra_columns: false

@@ -1,0 +1,28 @@
+# Installs Python, the agent package and the Databricks CLI on the build agent.
+parameters:
+  - name: pythonVersion
+    type: string
+    default: "3.11"
+  - name: extras
+    type: string
+    default: "llm,azure"
+
+steps:
+  - checkout: self
+    fetchDepth: 0          # full history: versioning and diffs need tags/commits
+    persistCredentials: true
+
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: ${{ parameters.pythonVersion }}
+    displayName: Use Python ${{ parameters.pythonVersion }}
+
+  - script: |
+      python -m pip install --upgrade pip build
+      pip install -e ".[${{ parameters.extras }}]"
+    displayName: Install agentic-devops
+
+  - script: |
+      curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
+      databricks --version
+    displayName: Install Databricks CLI
