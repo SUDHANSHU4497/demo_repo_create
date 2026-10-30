@@ -45,6 +45,11 @@ class FakeAdo:
     def diff_files(self, base_version, target_version):
         return list(self.diffs.get((base_version, target_version), []))
 
+    files: dict[tuple[str, str], str] = field(default_factory=dict)
+
+    def get_file_content(self, path, commit):
+        return self.files[(path, commit)]
+
     # pull requests
     def find_active_pr(self, source_branch, target_branch):
         for pr in self.prs.values():

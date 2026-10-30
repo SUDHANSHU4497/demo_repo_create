@@ -245,6 +245,20 @@ class AzureDevOpsClient:
             skip += len(changes)
         return sorted(set(files))
 
+    def get_file_content(self, path: str, commit: str) -> str:
+        """Text of one file at a commit (read-only; used by the remediation sub-agent)."""
+        data = self._get(
+            f"{self.repo_base}/items",
+            {
+                "path": path,
+                "versionDescriptor.version": commit,
+                "versionDescriptor.versionType": self._version_type(commit),
+                "includeContent": "true",
+                "$format": "json",
+            },
+        )
+        return (data or {}).get("content", "") if isinstance(data, dict) else str(data)
+
     # ------------------------------------------------------------------ pull requests
     def find_active_pr(self, source_branch: str, target_branch: str) -> PullRequest | None:
         data = self._get(

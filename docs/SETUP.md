@@ -28,7 +28,7 @@ Create three **Azure Resource Manager** connections using **workload identity fe
 
 | Group | Variables |
 |---|---|
-| `agentic-devops-common` | `ADO_ORG_URL`, `ADO_PROJECT`, `ADO_REPOSITORY`, `ADO_RELEASE_MANAGERS_GROUP_ID`, `TEAMS_WEBHOOK_URL` (secret), `LLM_ENABLED`, `LLM_PROVIDER`, `LLM_MODEL`, `ANTHROPIC_FOUNDRY_RESOURCE`, `AUDIT_SINK`, `DBX_AUDIT_WAREHOUSE_ID`, `DBX_QA_HOST` |
+| `agentic-devops-common` | `ADO_ORG_URL`, `ADO_PROJECT`, `ADO_REPOSITORY`, `ADO_RELEASE_MANAGERS_GROUP_ID`, `TEAMS_WEBHOOK_URL` (secret), `AUDIT_SINK`, `DBX_AUDIT_WAREHOUSE_ID`, `DBX_QA_HOST`, and for the LLM layer: `LLM_ENABLED`, `AZURE_AI_PROJECT_ENDPOINT`, `FOUNDRY_CLAUDE_DEPLOYMENT`, `FOUNDRY_GPT_DEPLOYMENT`, `FOUNDRY_GPT_MINI_DEPLOYMENT`, `FOUNDRY_MISTRAL_DEPLOYMENT`, optional `LLM_REMEDIATION_MODEL` / `LLM_PR_MODEL` / `LLM_RELEASE_MODEL`, `LLM_TRACING`, `APPLICATIONINSIGHTS_CONNECTION_STRING` (secret) |
 | `agentic-devops-dev` | `DBX_DEV_HOST`, `DBX_DEV_VALIDATION_JOB_ID`, `DBX_SP_APP_ID` |
 | `agentic-devops-qa` | `DBX_QA_HOST`, `DBX_QA_VALIDATION_JOB_ID`, `DBX_SP_APP_ID` |
 | `agentic-devops-prod` | `DBX_PROD_HOST`, `DBX_PROD_VALIDATION_JOB_ID`, `DBX_SP_APP_ID` |
@@ -81,23 +81,30 @@ Also enable *Project settings → Pipelines → Settings*: "Limit job authorizat
 ### 3.7 Optional: service hooks (event-driven mode)
 Project settings → Service hooks → Web Hooks: *Pull request created*, *Pull request updated*, *Code pushed* → your Function URL (see HLD §8). Set `qa_promotion.auto_promote_on_push: true` to open PRs on push.
 
-## 4. Optional: Claude advisor via Microsoft Foundry
+## 4. Azure AI Foundry models (LangChain)
 
-1. Deploy a Claude model in your Microsoft Foundry resource; note the resource name and deployment name.
-2. Give `sp-agentic-*` the *Cognitive Services User* role on the resource (Entra ID auth; no API key needed).
-3. Set `LLM_ENABLED=true`, `LLM_PROVIDER=foundry`, `ANTHROPIC_FOUNDRY_RESOURCE=<resource>`, `LLM_MODEL=<deployment>`.
+The agents use LangChain chat models from an Azure AI Foundry **project**. Which model does which task is configuration (`config/agentic.yml` → `llm.models`, `llm.tasks`).
 
-The advisor only receives metadata (rule ids, counts, column names, commit subjects). Keep `share_sample_values: false` unless your data-protection review allows sample keys to be sent.
+1. **Project**: in Azure AI Foundry create (or reuse) a project. Copy its endpoint: `https://<resource>.services.ai.azure.com/api/projects/<project>` → `AZURE_AI_PROJECT_ENDPOINT`.
+2. **Deploy models** you want to evaluate, e.g. a Claude model, `gpt-4.1`, `gpt-4.1-mini`, `Mistral-Large-2411`. Put each **deployment name** in its variable (`FOUNDRY_CLAUDE_DEPLOYMENT`, `FOUNDRY_GPT_DEPLOYMENT`, …). Add more under `llm.models` (`kind: foundry_openai` for OpenAI-compatible models, `foundry_anthropic` for Claude).
+3. **RBAC (Entra ID, no keys)**: grant `sp-agentic-dev`, `sp-agentic-qa` and `sp-agentic-prod` the **Azure AI User** role on the Foundry project (or *Cognitive Services User* on the resource). Developers running locally need the same role and `az login`.
+4. **Choose models per task**: edit `llm.tasks` or set `LLM_REMEDIATION_MODEL`, `LLM_PR_MODEL`, `LLM_RELEASE_MODEL` in the variable group. Keep a fallback from a different model family.
+5. **Verify**: `agentic-devops models --check` → every model reports `ok`. Typical errors: `403` (role missing), `404 DeploymentNotFound` (deployment name), DNS/`401` (endpoint or tenant).
+6. **Enable**: `LLM_ENABLED=true`. Optional tracing: `LLM_TRACING=azure_monitor` + `APPLICATIONINSIGHTS_CONNECTION_STRING`, and install `agentic-devops[tracing]`.
+
+Data sent to models: rule ids, counts, column names, commit subjects and — for remediation only — files changed in the PR (`share_source_code: true`). Row values stay out unless `share_sample_values: true`. If policy requires, set `share_source_code: false`.
 
 ## 5. Smoke test
 
 ```bash
-pip install -e ".[dev,azure]"
+pip install -e ".[dev,agents,foundry]"
 export AZURE_DEVOPS_PAT=...           # local only
 az login                              # Entra token for Databricks
 agentic-devops --dry-run validate --pr-id 123
 agentic-devops --dry-run promote-qa --source-branch feature/123-test
 agentic-devops --dry-run release-prepare
+agentic-devops models --check          # Foundry deployments reachable with your identity
+agentic-devops graph --name qa-promotion
 ```
 
 `--dry-run` reads everything and prints `planned_actions` without writing to Azure DevOps.

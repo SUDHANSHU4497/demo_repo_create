@@ -284,32 +284,127 @@ def _to_date(value: Any) -> date:
     return date.fromisoformat(str(value))
 
 
+MODEL_KINDS = ("foundry_openai", "foundry_anthropic", "langchain")
+STRUCTURED_OUTPUT_METHODS = ("function_calling", "json_schema", "json_mode")
+LLM_TASKS = ("remediation", "pr_description", "release_assessment")
+
+
+@dataclass
+class ModelConfig:
+    """A logical model name mapped to a deployment.
+
+    kind:
+      foundry_openai     Azure AI Foundry, OpenAI-compatible API: GPT, Mistral, Llama, DeepSeek, Cohere, ...
+      foundry_anthropic  Azure AI Foundry, Anthropic Messages API: Claude
+      langchain          any LangChain provider via init_chat_model("provider:model"), e.g. Databricks serving
+    """
+
+    name: str
+    kind: str
+    deployment: str
+    endpoint: str | None = None  # overrides llm.project_endpoint for this model
+    max_tokens: int | None = 4096
+    timeout: float = 120.0
+    max_retries: int = 2
+    structured_output: str = "function_calling"
+    params: dict[str, Any] = field(
+        default_factory=dict
+    )  # provider-specific (temperature, reasoning_effort, ...)
+
+    @classmethod
+    def from_dict(cls, name: str, d: dict[str, Any]) -> ModelConfig:
+        kind = (_opt_str(d.get("kind")) or "").lower()
+        if kind not in MODEL_KINDS:
+            raise ConfigError(f"llm.models.{name}.kind must be one of {MODEL_KINDS}")
+        deployment = _opt_str(d.get("deployment"))
+        if not deployment:
+            raise ConfigError(f"llm.models.{name}.deployment is required")
+        # Claude: native JSON-schema structured outputs. Newer Claude models reject the *forced* tool
+        # choice that "function_calling" relies on, and Foundry deployment names hide the model version.
+        default_method = "json_schema" if kind == "foundry_anthropic" else "function_calling"
+        method = (_opt_str(d.get("structured_output")) or default_method).lower()
+        if method not in STRUCTURED_OUTPUT_METHODS:
+            raise ConfigError(
+                f"llm.models.{name}.structured_output must be one of {STRUCTURED_OUTPUT_METHODS}"
+            )
+        return cls(
+            name=name,
+            kind=kind,
+            deployment=deployment,
+            endpoint=_opt_str(d.get("endpoint")),
+            max_tokens=_opt_int(d.get("max_tokens")) if d.get("max_tokens") is not None else 4096,
+            timeout=float(d.get("timeout", 120.0)),
+            max_retries=int(d.get("max_retries", 2)),
+            structured_output=method,
+            params=dict(d.get("params") or {}),
+        )
+
+
+@dataclass
+class TaskConfig:
+    """Which model handles a task, with ordered fallbacks (used when the primary errors or times out)."""
+
+    model: str
+    fallbacks: list[str] = field(default_factory=list)
+    use_tools: bool = False  # remediation only: let the model investigate with read-only tools
+    max_tool_rounds: int = 4  # investigation rounds (each round may call several tools)
+
+    @classmethod
+    def from_dict(cls, task: str, d: dict[str, Any]) -> TaskConfig:
+        model = _opt_str(d.get("model"))
+        if not model:
+            raise ConfigError(f"llm.tasks.{task}.model is required")
+        return cls(
+            model=model,
+            fallbacks=[f for f in (_opt_str(x) for x in d.get("fallbacks") or []) if f and f != model],
+            use_tools=_bool(d.get("use_tools"), False),
+            max_tool_rounds=int(d.get("max_tool_rounds", 4)),
+        )
+
+
 @dataclass
 class LlmConfig:
     enabled: bool = False
-    provider: str = "none"  # anthropic | foundry | none
-    model: str = "claude-opus-5-5"
-    effort: str = "medium"
-    max_tokens: int = 16000
-    foundry_resource: str | None = None
-    foundry_fallback_model: str = "claude-opus-4-8"
+    project_endpoint: str | None = None  # https://<resource>.services.ai.azure.com/api/projects/<project>
+    auth: str = "entra"  # entra (managed identity / workload identity / az login) | api_key
+    api_key_env: str = "AZURE_AI_FOUNDRY_API_KEY"
+    models: dict[str, ModelConfig] = field(default_factory=dict)
+    tasks: dict[str, TaskConfig] = field(default_factory=dict)
     share_sample_values: bool = False
+    share_source_code: bool = True
+    tracing: str = "none"  # none | azure_monitor
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> LlmConfig:
         base = cls()
-        provider = (_opt_str(d.get("provider")) or base.provider).lower()
-        if provider not in ("anthropic", "foundry", "none"):
-            raise ConfigError("llm.provider must be one of anthropic | foundry | none")
+        auth = (_opt_str(d.get("auth")) or base.auth).lower()
+        if auth not in ("entra", "api_key"):
+            raise ConfigError("llm.auth must be 'entra' or 'api_key'")
+        tracing = (_opt_str(d.get("tracing")) or base.tracing).lower()
+        if tracing not in ("none", "azure_monitor"):
+            raise ConfigError("llm.tracing must be 'none' or 'azure_monitor'")
+        models = {name: ModelConfig.from_dict(name, m or {}) for name, m in (d.get("models") or {}).items()}
+        tasks = {}
+        for task, t in (d.get("tasks") or {}).items():
+            if task not in LLM_TASKS:
+                raise ConfigError(f"Unknown llm task '{task}'. Known: {LLM_TASKS}")
+            spec = TaskConfig.from_dict(task, t or {})
+            for ref in [spec.model, *spec.fallbacks]:
+                if ref not in models:
+                    raise ConfigError(
+                        f"llm.tasks.{task} refers to unknown model '{ref}'. Known: {sorted(models)}"
+                    )
+            tasks[task] = spec
         return cls(
-            enabled=_bool(d.get("enabled"), base.enabled) and provider != "none",
-            provider=provider,
-            model=_opt_str(d.get("model")) or base.model,
-            effort=_opt_str(d.get("effort")) or base.effort,
-            max_tokens=int(d.get("max_tokens", base.max_tokens)),
-            foundry_resource=_opt_str(d.get("foundry_resource")),
-            foundry_fallback_model=_opt_str(d.get("foundry_fallback_model")) or base.foundry_fallback_model,
+            enabled=_bool(d.get("enabled"), base.enabled),
+            project_endpoint=(_opt_str(d.get("project_endpoint")) or "").rstrip("/") or None,
+            auth=auth,
+            api_key_env=_opt_str(d.get("api_key_env")) or base.api_key_env,
+            models=models,
+            tasks=tasks,
             share_sample_values=_bool(d.get("share_sample_values"), base.share_sample_values),
+            share_source_code=_bool(d.get("share_source_code"), base.share_source_code),
+            tracing=tracing,
         )
 
 

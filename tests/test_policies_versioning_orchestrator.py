@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timezone
 
 import pytest
@@ -114,3 +115,41 @@ def test_orchestrator_routes_events(make_ctx, fake_ado):
     }
     assert orch.handle_event(other).status is AgentStatus.SKIPPED
     assert orch.handle_event({"eventType": "build.complete"}).status is AgentStatus.SKIPPED
+
+
+def test_supervisor_routes_commands_and_exposes_graphs(make_ctx, fake_ado):
+    ctx = make_ctx()
+    v = DataValidationAgent(ctx)
+    orch = Orchestrator(ctx, v, QaPromotionAgent(ctx, v), ReleaseAgent(ctx, v))
+    assert orch.run_command("rollback-target").agent == "release-agent"
+    assert orch.run_command("validate", environment="dev", validate_all=True).status is AgentStatus.SUCCEEDED
+    assert orch.run_command("promote-qa", source_branch="main").status is AgentStatus.BLOCKED
+    with pytest.raises(ValueError):
+        orch.run_command("deploy-everything")
+    graphs = orch.graphs()
+    assert set(graphs) == {
+        "supervisor",
+        "data-validation",
+        "qa-promotion",
+        "qa-certification",
+        "release-preparation",
+        "release-finalization",
+    }
+    mermaid = graphs["release-preparation"].get_graph().draw_mermaid()
+    assert "check_change_window" in mermaid and "notify_approvers" in mermaid
+    assert "find_pr -.-> check_draft" in graphs["qa-promotion"].get_graph().draw_mermaid()
+
+
+def test_cli_graph_and_models_commands(capsys, monkeypatch):
+    from agentic_devops.cli import main
+
+    monkeypatch.chdir(__import__("tests.conftest").conftest.REPO_ROOT)
+    assert main(["graph", "--name", "data-validation"]) == 0
+    out = capsys.readouterr().out
+    assert "run_checks" in out and "graph TD" in out and "__start__([start])" in out
+    assert main(["models"]) == 0
+    routing = json.loads(capsys.readouterr().out)
+    assert routing["tasks"]["remediation"]["model"] == "claude"
+    monkeypatch.setenv("LLM_REMEDIATION_MODEL", "mistral")
+    assert main(["models"]) == 0
+    assert json.loads(capsys.readouterr().out)["tasks"]["remediation"]["deployment"] == "Mistral-Large-2411"

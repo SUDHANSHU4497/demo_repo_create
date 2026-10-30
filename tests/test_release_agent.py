@@ -6,8 +6,8 @@ import pandas as pd
 
 from agentic_devops.agents.data_validation_agent import DataValidationAgent
 from agentic_devops.agents.release_agent import COMMENT_MARKER, QA_CERT_STATUS, ReleaseAgent
-from agentic_devops.core.llm import ReleaseAssessment
 from agentic_devops.integrations.azure_devops import Commit, GitTag, PullRequest
+from agentic_devops.llm.base import ReleaseAssessment
 from agentic_devops.models import AgentStatus
 from tests.conftest import make_config
 
@@ -111,7 +111,7 @@ def test_high_risk_adds_required_reviewers_and_advisor_cannot_lower_risk(make_ct
             assert context["rule_based_risk"] == "high"
             return ReleaseAssessment("low", ["looks harmless"], "**Highlights**\n- dedupe")
 
-        def remediation(self, report):
+        def remediation(self, report, context=None):
             return None
 
         def pr_text(self, context):

@@ -17,7 +17,7 @@ stages:
         pool: { vmImage: ubuntu-latest }
         steps:
           - template: templates/setup.yml
-            parameters: { extras: "dev,llm,azure" }
+            parameters: { extras: "dev,agents,foundry" }
           - script: ruff check src tests && ruff format --check src tests
             displayName: Lint
           - script: python -m pytest -q --junitxml=$(Build.ArtifactStagingDirectory)/junit.xml

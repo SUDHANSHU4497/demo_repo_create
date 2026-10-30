@@ -15,10 +15,17 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-llm = ["anthropic>=2.3"]
+# Agent runtime (CLI / pipelines). The Databricks validation job needs none of these.
+agents = ["langgraph>=1.2,<2", "langchain-core>=1.7,<2", "pydantic>=2.7", "azure-identity>=1.15"]
+# Models hosted in Azure AI Foundry (GPT, Mistral, Llama, DeepSeek via the OpenAI API; Claude via Anthropic API)
+foundry = ["langchain-azure-ai>=1.2,<2", "langchain-anthropic>=1.7,<2", "langchain-openai>=1.7,<2"]
+# LLM call tracing to Application Insights (OpenTelemetry GenAI spans)
+tracing = ["langchain-azure-ai[opentelemetry]>=1.2,<2"]
+# Escape hatch: any LangChain provider through init_chat_model("provider:model")
+langchain = ["langchain>=1.4,<2"]
 azure = ["azure-identity>=1.15"]
 spark = ["pyspark>=3.5"]
-dev = ["pytest>=8", "pandas>=2.0", "ruff>=0.5"]
+dev = ["pytest>=8", "pandas>=2.0", "ruff>=0.5", "agentic-devops[agents]"]
 
 [project.scripts]
 agentic-devops = "agentic_devops.cli:main"

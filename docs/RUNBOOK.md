@@ -32,7 +32,9 @@ Validate before raising a PR: `notebooks/validate_my_tables.py` runs the same ru
 | Rollback found no previous tag | First release — disable the affected jobs in the prod workspace and fix forward. |
 | Pipeline re-run after partial failure | Safe: agents are idempotent (reuse PR, comment, rc branch, tags). |
 | Validation job slow | Add `validation.filter` to large contracts (bounded window), check serverless quotas, raise `timeout_minutes`. |
-| LLM down / disabled | Nothing to do; templates are used. |
+| LLM down / disabled | Nothing to do; templates are used and gates are unaffected. |
+| Advisor notes missing or worse than usual | `agentic-devops models --check`: `403` → grant *Azure AI User* on the Foundry project; `404` → fix the deployment name variable; throttling → move the task to another model (`LLM_*_MODEL`) or add a fallback. |
+| Want a different model for a task | Set `LLM_REMEDIATION_MODEL` / `LLM_PR_MODEL` / `LLM_RELEASE_MODEL` in `agentic-devops-common`, or edit `llm.tasks` (PR). Re-run the evaluation set first (PLAN §5). |
 
 ## Hotfix
 

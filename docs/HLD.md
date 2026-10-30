@@ -4,7 +4,8 @@
 |---|---|
 | **Status** | Proposed v1.0 |
 | **Scope** | Code written in Azure Databricks → PR in Azure DevOps → `main` (QA workspace) → `release` (production workspace) |
-| **Companion docs** | [LLD](LLD.md) · [ADRs](adr/) · [Setup](SETUP.md) · [Runbook](RUNBOOK.md) |
+| **Agent framework** | LangGraph (workflows) + LangChain (models) on Azure AI Foundry |
+| **Companion docs** | [Plan](PLAN.md) · [LLD](LLD.md) · [Graphs](GRAPHS.md) · [ADRs](adr/) · [Setup](SETUP.md) · [Runbook](RUNBOOK.md) |
 
 ---
 
@@ -36,12 +37,13 @@ Data engineers build pipelines in Azure Databricks (Git folders backed by Azure 
 
 | # | Decision | Why | ADR |
 |---|---|---|---|
-| 1 | **Deterministic gates, LLM advisory only.** Pass/fail, merges, tags and deployments are decided by code and Azure DevOps policies. Claude writes PR descriptions, fix suggestions, release notes and a risk opinion that can only *raise* risk. | Gates must be reproducible and explainable to auditors; LLM output is non-deterministic and could be prompt-injected through PR text. | [0001](adr/0001-deterministic-gates-llm-advisory.md) |
+| 1 | **Deterministic gates, LLM advisory only.** Pass/fail, merges, tags and deployments are decided by code and Azure DevOps policies. An LLM from Azure AI Foundry writes PR descriptions, fix suggestions, release notes and a risk opinion that can only *raise* risk. | Gates must be reproducible and explainable to auditors; LLM output is non-deterministic and could be prompt-injected through PR text. | [0001](adr/0001-deterministic-gates-llm-advisory.md) |
 | 2 | **Agents run inside Azure Pipelines** (phase 1); an event-driven host is optional (phase 2). | No new infrastructure; reuses service connections, approvals, logs and artifacts already governed by Azure DevOps. | [0002](adr/0002-pipeline-hosted-agents.md) |
 | 3 | **Branch policies are the enforcement point.** Agents publish PR *statuses*; branch policies *require* them. The agent identity cannot bypass policies. | A compromised or buggy agent still cannot merge un-validated code. | [0003](adr/0003-branching-and-promotion.md) |
 | 4 | **Validation compute runs in Databricks**, next to the data, as a bundle-deployed job. Only a JSON report leaves the workspace. | Data never leaves Unity Catalog governance; scales with Spark. | [0004](adr/0004-validation-runs-in-databricks.md) |
 | 5 | **Data contracts in git** (`contracts/**.yml`) declare PK, columns, nullability and owning code paths. | Reviewable with the code; drives impact analysis (which tables a PR touches). | [0004](adr/0004-validation-runs-in-databricks.md) |
 | 6 | **Agents are reconcilers**: observe state → do only the missing steps. | Safe pipeline retries; no duplicate PRs, tags or comments. | [LLD §6](LLD.md#6-agent-design) |
+| 7 | **LangGraph for agent workflows, LangChain + Azure AI Foundry for models.** Each agent is a compiled state graph; a supervisor graph routes work; models are LangChain chat models chosen per task from Foundry deployments, with fallbacks. | Switch models (Claude, GPT, Mistral, Llama…) by configuration; inspectable graphs; Entra ID end to end. | [0005](adr/0005-langgraph-langchain-foundry.md) |
 
 ## 4. Context
 
@@ -59,7 +61,7 @@ flowchart LR
     PIPE -->|Jobs API, Files API| DBXdev
     PIPE -->|bundle deploy, validate| DBXqa["Databricks QA workspace"]
     PIPE -->|bundle deploy, verify| DBXprod["Databricks PROD workspace"]
-    PIPE -.->|metadata only, optional| LLM["Claude in Microsoft Foundry"]
+    PIPE -.->|metadata only, optional| LLM["Azure AI Foundry<br/>Claude · GPT · Mistral · Llama"]
     PIPE -->|cards| TEAMS["Microsoft Teams"]
     UC[(Unity Catalog<br/>catalogs dev / qa / prod)] --- DBXdev & DBXqa & DBXprod
 ```
@@ -77,12 +79,12 @@ flowchart TB
       T6["Service hooks<br/>(optional, phase 2)"]
     end
 
-    subgraph Agents["agentic-devops package"]
-      ORCH["Orchestrator<br/>event router"]
+    subgraph Agents["agentic-devops (LangGraph)"]
+      ORCH["Supervisor graph<br/>command / event router"]
       DVA["Data Validation Agent"]
       QPA["QA Promotion Agent"]
       RA["Release Agent"]
-      ADV["LLM Advisor<br/>(advisory only)"]
+      ADV["LLM Advisor<br/>LangChain · advisory only"]
       POLY["Policies<br/>change window · versioning · risk"]
       AUD["Audit trail"]
     end
@@ -108,7 +110,37 @@ flowchart TB
     DVA & QPA & RA --> ADOAPI
 ```
 
-### 5.1 Agents and responsibilities
+### 5.1 Agent runtime: LangGraph + LangChain + Azure AI Foundry
+
+```mermaid
+flowchart LR
+    CLI["CLI / pipeline step<br/>or service-hook event"] --> SUP["Supervisor graph"]
+    SUP --> G1["Data Validation flow"]
+    SUP --> G2["QA Promotion flows<br/>promote · certify"]
+    SUP --> G3["Release flows<br/>prepare · finalize"]
+    G1 -->|advise step| ADV["LangChain advisor"]
+    G2 -->|draft_pr step| ADV
+    G3 -->|assess_risk step| ADV
+    ADV --> REM["Remediation sub-agent<br/>investigate ⇄ read-only tools"]
+    ADV --> REG["Model registry<br/>task → model + fallbacks"]
+    REM --> REG
+    REG -->|Entra ID| FP["Azure AI Foundry project endpoint"]
+    FP --> M1["Claude<br/>Anthropic API"]
+    FP --> M2["GPT · Mistral · Llama · DeepSeek<br/>OpenAI-compatible API"]
+```
+
+* **Flows are LangGraph state graphs** ([diagrams generated from code](GRAPHS.md)). Each node is one step (check, tool call, publish); conditional edges are plain Python, so every gate decision stays deterministic. Any step can end the flow with a result (blocked, skipped, failed, waiting, succeeded).
+* **Models are LangChain chat models** behind a registry. `config/agentic.yml` maps logical names (`claude`, `gpt`, `gpt-mini`, `mistral`) to Foundry deployments and each task to a model plus fallbacks. Changing the model for a task is a one-line config or variable-group change.
+* **The remediation sub-agent** is the one place a model drives a loop: it may call read-only tools (data contract, findings, naming glossary, files changed in the PR) for a capped number of rounds, then writes fix suggestions. It cannot change anything.
+* **Structured outputs** are Pydantic schemas (`with_structured_output`), so any model returns the same shape; Claude uses native JSON-schema output, other models tool calling.
+
+| Task | Step | Default model → fallback | Output |
+|---|---|---|---|
+| `remediation` | Data Validation `advise` | `claude` → `gpt` (tools on) | "Advisor notes" with fixes and code in the PR comment |
+| `pr_description` | QA Promotion `draft_pr` | `gpt-mini` → `gpt` | PR title (must be a Conventional Commit) and description |
+| `release_assessment` | Release `assess_risk` | `claude` → `gpt` | Risk opinion (can only raise the rule-based floor) and release notes |
+
+### 5.2 Agents and responsibilities
 
 | Agent | Goal | Inputs (perception) | Actions (tools) | Guardrails |
 |---|---|---|---|---|
@@ -116,7 +148,7 @@ flowchart TB
 | **QA Promotion Agent** | Feature branch merged into `main`, deployed to QA, and certified. | Branch, commits, diff, PR state, policy evaluations | Create/reuse PR, link work items, set auto-complete (squash), post `qa-promotion` status, after deploy validate QA + create `qa-certified/*` tag | Only `feature/*`, `bugfix/*`, `hotfix/*`; work item required; never bypasses policies; never approves |
 | **Release Agent** | A QA-certified commit merged into `release`, deployed to production, verified and tagged. | Certified tags, release history, commits, diff, change calendar | Version (SemVer), `rc/vX.Y.Z` branch pinned to the certified commit, release PR + evidence, auto-complete (merge commit), add reviewers on HIGH risk, after deploy verify + tag `vX.Y.Z`, hotfix back-merge PR, rollback target | Change window + freeze calendar; one release in flight; only certified commits; LLM can only *raise* risk; humans approve PR **and** prod environment |
 
-### 5.2 What the Data Validation Agent checks
+### 5.3 What the Data Validation Agent checks
 
 | Family | Checks | Default severity |
 |---|---|---|
@@ -270,8 +302,8 @@ flowchart LR
 | Data access | Validation SP: `USE CATALOG`, `SELECT` on governed schemas, write only to `ops.validation_results` and the `ops.agentic_validation` volume. Data never leaves the workspace — only aggregate counts and up to 5 sample keys in the report. |
 | Separation of duties | Merges only via auto-complete after policies; production needs PR approval **and** environment approval by different groups; the agent never votes. |
 | Pipeline integrity | Pipelines run YAML from `main`/`release` (`promote-to-qa` is queued against `main` with the branch as a parameter), so a feature branch cannot change the gate that judges it. |
-| LLM data handling | Off by default. When on: Claude in **Microsoft Foundry** in the company's Azure tenant via Entra ID; only metadata (rule ids, counts, column names, commit subjects); row values excluded unless `share_sample_values: true`; output sanitised (no HTML/images). |
-| Prompt injection | PR titles/commits are wrapped as untrusted input; model output is never executed or used as a decision; an injected title fails the Conventional-Commit check and is replaced by the template. |
+| LLM data handling | Off by default. When on: models in the company's **Azure AI Foundry** project, called with Entra ID (no API keys); the service principals need *Azure AI User* on the project. Only metadata (rule ids, counts, column names, commit subjects) plus — for remediation — files changed in the PR (`share_source_code`); row values excluded unless `share_sample_values: true`; output sanitised (no HTML/images); traces record no prompt content. |
+| Prompt injection | PR titles, commits and tool results are treated as untrusted input; the remediation sub-agent has read-only tools limited to the PR's changed files; model output is never executed or used as a decision; an injected title fails the Conventional-Commit check and is replaced by the template. |
 | Secrets | Key Vault-linked variable groups; `${VAR}` interpolation in config; nothing in git. |
 | Audit | Every agent decision → JSONL artifact on the run + `ops.audit_events` Delta table; PR comments and statuses are a human-readable trail. |
 
@@ -279,7 +311,7 @@ flowchart LR
 
 | NFR | Target / approach |
 |---|---|
-| **Correctness** | Fail closed on any error; deterministic rules; 79 unit tests incl. end-to-end agent flows against an Azure DevOps double. |
+| **Correctness** | Fail closed on any error; deterministic rules; 88 tests incl. end-to-end agent flows against an Azure DevOps double and scripted LangChain models. |
 | **Idempotency** | Each step checks current state first (existing PR, comment marker, tag, `rc/*` branch, auto-complete flag); Databricks `run-now` uses an idempotency token. |
 | **Performance** | One Spark aggregation for row count + NULL counts of all columns; one shuffle per PK check; schema rules need no scan. Contract `filter` bounds scans of very large tables. PR gate typically 3–8 min on serverless. |
 | **Scalability** | Impact analysis validates only tables touched by the PR; `max_concurrent_runs` on the job; rules are pluggable. |
@@ -309,7 +341,10 @@ flowchart LR
 | Deployment of jobs | Databricks Asset Bundles (`databricks.yml`) |
 | CI/CD | Azure Pipelines YAML, branch policies, environments |
 | Contracts & config | YAML in git |
-| LLM (optional) | Claude (`claude-opus-5-5`) via Microsoft Foundry (Entra ID) or the Anthropic API |
+| Agent framework | LangGraph (state graphs, supervisor, tool loop) |
+| LLM abstraction | LangChain chat models, Pydantic structured outputs, `with_fallbacks` |
+| Models (optional) | Azure AI Foundry deployments via `langchain-azure-ai` (Claude, GPT, Mistral, Llama, …), Entra ID |
+| LLM tracing | OpenTelemetry → Application Insights (`AzureAIOpenTelemetryTracer`) |
 | Notifications | Teams Workflows webhook (Adaptive Cards) |
 | Audit / history | Delta tables in `ops` schema |
 
@@ -321,11 +356,8 @@ flowchart LR
 | Contracts drift from reality | Schema-contract rule flags drift both ways; contract changes raise release risk. |
 | Over-blocking frustrates teams | Severity overrides, `allow_fully_null`, shift-left notebook, actionable fix suggestions in every finding. |
 | Agent identity over-privileged | Permission matrix in SETUP, denied bypass permissions, separate SP per workspace. |
-| LLM cost / data residency | Off by default; metadata-only; Foundry in-tenant; `effort: medium`; one call per gate. |
+| LLM cost / data residency / model churn | Off by default; metadata-only; Foundry in-tenant; small model for high-volume tasks; per-task fallbacks from another model family; model choice is config. |
 
 ## 14. Rollout plan
 
-1. **Week 1–2:** onboard one domain (sales). Contracts for its tables, `pr-validation` as *optional* policy, observe findings.
-2. **Week 3:** make `data-validation` *required* on `main`; enable `promote-to-qa` and `cd-qa` certification.
-3. **Week 4:** release agent on `release` with environment approvals; first agent-driven production release.
-4. **Week 5+:** more domains; enable the LLM advisor; consider phase-2 event hosting; add rule families (freshness, referential integrity, anomaly).
+See the [delivery plan](PLAN.md): 8 weeks from foundations to the first agent-driven production release, with every gate in shadow mode before it is enforced and models chosen per task by evaluation.

@@ -3,7 +3,7 @@
 **Status:** Accepted · **Date:** 2026-10-30
 
 ## Context
-The system is called "agentic" and uses Claude, but its outputs gate production releases of data pipelines. Gate decisions must be reproducible, explainable to auditors and resistant to manipulation. PR titles, descriptions and commit messages are free text written by anyone with push access, so anything an LLM reads from them is a prompt-injection vector.
+The system is called "agentic" and uses LLMs (served from Azure AI Foundry, see ADR 0005), but its outputs gate production releases of data pipelines. Gate decisions must be reproducible, explainable to auditors and resistant to manipulation. PR titles, descriptions and commit messages are free text written by anyone with push access, so anything an LLM reads from them is a prompt-injection vector.
 
 ## Decision
 * Every decision that changes state or lets code through — pass/fail of validation, merge, tag, deployment, rollback — is made by deterministic code and Azure DevOps branch policies.

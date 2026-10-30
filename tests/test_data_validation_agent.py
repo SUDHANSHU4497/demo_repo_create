@@ -107,3 +107,34 @@ def test_audit_event_recorded(make_ctx, fake_ado):
         "succeeded",
         7,
     )
+
+
+def test_failed_validation_hands_remediation_context_to_advisor(make_ctx, fake_ado, tables):
+    tables["dev.sales.orders"] = pd.DataFrame(
+        {"order_id": [1, 1], "customer_id": [1, 2], "order_amount": [1.0, 2.0], "discount_code": [None, None]}
+    )
+    open_pr(fake_ado)
+    fake_ado.files[("/src/pipelines/sales/orders/job.py", "c" * 40)] = "df.write.saveAsTable('sales.orders')"
+    seen = {}
+
+    class Advisor:
+        def remediation(self, report, context=None):
+            seen["files"] = context.changed_files
+            seen["code"] = context.read_file("/src/pipelines/sales/orders/job.py")
+            seen["contracts"] = sorted(c.table for c in context.contracts)
+            return "1. **Use MERGE** — append creates duplicates"
+
+        def pr_text(self, context):
+            return None
+
+        def release_assessment(self, context):
+            return None
+
+    result = DataValidationAgent(make_ctx(advisor=Advisor())).run(ValidationRequest(pr_id=7))
+    assert result.status is AgentStatus.FAILED and result.outputs["advisor_used"] is True
+    assert seen == {
+        "files": ["/src/pipelines/sales/orders/job.py"],
+        "code": "df.write.saveAsTable('sales.orders')",
+        "contracts": ["sales.customers", "sales.orders"],
+    }
+    assert "Use MERGE" in fake_ado.comments[(7, COMMENT_MARKER)]["content"]

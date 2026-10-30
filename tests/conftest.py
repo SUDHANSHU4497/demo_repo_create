@@ -10,7 +10,7 @@ import yaml
 from agentic_devops.config import AppConfig
 from agentic_devops.core.agent import AgentContext
 from agentic_devops.core.audit import MemoryAuditSink
-from agentic_devops.core.llm import NullAdvisor
+from agentic_devops.llm.base import NullAdvisor
 from agentic_devops.validation.backends import PandasBackend
 from tests.fakes import FakeAdo
 

@@ -4,8 +4,8 @@ import pandas as pd
 
 from agentic_devops.agents.data_validation_agent import DataValidationAgent
 from agentic_devops.agents.qa_promotion_agent import STATUS_NAME, QaPromotionAgent
-from agentic_devops.core.llm import PrText
 from agentic_devops.integrations.azure_devops import Commit, GitTag, PolicyEvaluation
+from agentic_devops.llm.base import PrText
 from agentic_devops.models import AgentStatus
 
 SRC = "feature/4521-orders-dedupe"
@@ -90,7 +90,7 @@ def test_advisor_title_used_only_if_conventional(make_ctx, fake_ado):
             assert context["governed_tables_affected"] == ["sales.orders"]
             return PrText(self.title, "LLM summary")
 
-        def remediation(self, report):
+        def remediation(self, report, context=None):
             return None
 
         def release_assessment(self, context):

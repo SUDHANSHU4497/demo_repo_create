@@ -89,14 +89,51 @@ release:
       reason: Year-end freeze
 
 llm:
+  # LLM work is advisory (PR text, fix suggestions, release notes). Gates never depend on it.
   enabled: ${LLM_ENABLED:-false}
-  provider: ${LLM_PROVIDER:-foundry}     # foundry (Claude in Microsoft Foundry) | anthropic | none
-  model: ${LLM_MODEL:-claude-opus-5-5}   # on Foundry: your deployment name
-  effort: medium
-  max_tokens: 16000
-  foundry_resource: ${ANTHROPIC_FOUNDRY_RESOURCE:-}
-  foundry_fallback_model: claude-opus-4-8
-  share_sample_values: false            # never send row values (e.g. duplicate keys) to the LLM
+  # Azure AI Foundry project endpoint: https://<resource>.services.ai.azure.com/api/projects/<project>
+  project_endpoint: ${AZURE_AI_PROJECT_ENDPOINT:-}
+  auth: ${FOUNDRY_AUTH:-entra}            # entra (workload identity / managed identity) | api_key
+  api_key_env: AZURE_AI_FOUNDRY_API_KEY   # only for auth: api_key
+
+  # Logical name -> Foundry deployment. Add any model you deploy in Foundry here.
+  models:
+    claude:
+      kind: foundry_anthropic             # Claude via the Foundry Anthropic endpoint
+      deployment: ${FOUNDRY_CLAUDE_DEPLOYMENT:-claude-opus-5-5}
+      max_tokens: 8000
+    gpt:
+      kind: foundry_openai                # GPT, Mistral, Llama, DeepSeek, Cohere... via the OpenAI-compatible API
+      deployment: ${FOUNDRY_GPT_DEPLOYMENT:-gpt-4.1}
+      max_tokens: 8000
+    gpt-mini:
+      kind: foundry_openai
+      deployment: ${FOUNDRY_GPT_MINI_DEPLOYMENT:-gpt-4.1-mini}
+      max_tokens: 4000
+      params: {temperature: 0.2}
+    mistral:
+      kind: foundry_openai
+      deployment: ${FOUNDRY_MISTRAL_DEPLOYMENT:-Mistral-Large-2411}
+      max_tokens: 4000
+      structured_output: function_calling
+
+  # Which model does which job. Switch a model by changing one name (or the env var).
+  tasks:
+    remediation:                          # fix suggestions on failed validation (tool-using sub-agent)
+      model: ${LLM_REMEDIATION_MODEL:-claude}
+      fallbacks: [gpt]
+      use_tools: true                     # may read contracts, glossary and the PR's changed files
+      max_tool_rounds: 4
+    pr_description:                       # high volume, simple: a small model is enough
+      model: ${LLM_PR_MODEL:-gpt-mini}
+      fallbacks: [gpt]
+    release_assessment:                   # low volume, needs judgement
+      model: ${LLM_RELEASE_MODEL:-claude}
+      fallbacks: [gpt]
+
+  share_sample_values: false              # never send row values (e.g. duplicate keys) to a model
+  share_source_code: true                 # remediation may read files changed in the PR (in-tenant Foundry)
+  tracing: ${LLM_TRACING:-none}           # none | azure_monitor (APPLICATIONINSIGHTS_CONNECTION_STRING)
 
 notifications:
   teams_webhook_url: ${TEAMS_WEBHOOK_URL:-}

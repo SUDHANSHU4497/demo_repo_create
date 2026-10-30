@@ -30,6 +30,8 @@ steps:
         agentic-devops ${{ parameters.command }}
     env:
       SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+      # Foundry models: AZURE_AI_PROJECT_ENDPOINT, FOUNDRY_*_DEPLOYMENT, LLM_* come from the
+      # agentic-devops-common variable group; the az login above provides the Entra ID token.
 
   - task: PublishPipelineArtifact@1
     displayName: Publish agent evidence

@@ -16,7 +16,6 @@ from agentic_devops.core.audit import (
     JsonlAuditSink,
     MemoryAuditSink,
 )
-from agentic_devops.core.llm import build_advisor
 from agentic_devops.core.orchestrator import Orchestrator
 from agentic_devops.core.runtime import pipeline_run_url
 from agentic_devops.integrations.auth import ado_auth_from_env, databricks_auth_from_env
@@ -24,6 +23,7 @@ from agentic_devops.integrations.azure_devops import AzureDevOpsClient
 from agentic_devops.integrations.databricks import DatabricksClient
 from agentic_devops.integrations.http import HttpClient
 from agentic_devops.integrations.notifications import NullNotifier, TeamsNotifier
+from agentic_devops.llm.advisor import build_advisor
 
 
 @dataclass

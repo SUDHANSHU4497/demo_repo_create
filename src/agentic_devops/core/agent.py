@@ -19,8 +19,8 @@ from typing import Any
 
 from agentic_devops.config import AppConfig
 from agentic_devops.core.audit import AuditEvent, AuditSink
-from agentic_devops.core.llm import Advisor
 from agentic_devops.integrations.notifications import Notifier
+from agentic_devops.llm.base import Advisor
 from agentic_devops.models import AgentResult, AgentStatus
 
 log = logging.getLogger(__name__)

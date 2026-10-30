@@ -255,3 +255,10 @@ def test_sql_audit_sink_is_parameterised():
     assert {"name": "pr_id", "type": "INT"} in params  # NULL -> value omitted
     with pytest.raises(ValueError):
         DatabricksSqlAuditSink(Client(), "wh1", "x; DROP TABLE y")
+
+
+def test_get_file_content_reads_at_commit():
+    http = RecordingHttp({("GET", "/items"): {"content": "print('hi')"}})
+    assert ado(http).get_file_content("/src/a.py", "c" * 40) == "print('hi')"
+    params = http.calls[0][2]["params"]
+    assert params["versionDescriptor.versionType"] == "commit" and params["includeContent"] == "true"
